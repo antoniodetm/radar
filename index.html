@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Radar AR - Enfoque Dinámico Pro</title>
+    <title>Radar AR - Barrios y Ciudades</title>
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
     
@@ -15,7 +15,6 @@
       }
       body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #000; color: white; }
 
-      /* Pantalla de inicio */
       #overlay {
         position: fixed; inset: 0; z-index: 9999; background: #000;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -26,7 +25,6 @@
         text-transform: uppercase; cursor: pointer; letter-spacing: 2px;
       }
 
-      /* HUD Superior */
       .hud-header { 
         position: fixed; top: 0; left: 0; right: 0; z-index: 1000; 
         background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent);
@@ -35,155 +33,138 @@
       .radar-label { font-weight: 800; letter-spacing: 5px; font-size: 12px; color: var(--neon); text-transform: uppercase; }
       .radar-line { width: 40%; height: 2px; background: var(--neon); margin: 8px auto; box-shadow: 0 0 10px var(--neon); }
 
-      /* Punto Central de la Cámara */
+      /* Punto central */
       .center-dot {
         position: fixed; top: 50%; left: 50%; 
-        width: 6px; height: 6px; background: var(--neon); 
+        width: 8px; height: 8px; background: var(--neon); 
         border-radius: 50%; transform: translate(-50%, -50%);
-        z-index: 2000; box-shadow: 0 0 12px var(--neon);
+        z-index: 2000; box-shadow: 0 0 15px var(--neon);
         pointer-events: none;
       }
-      .crosshair-ring {
-        position: fixed; top: 50%; left: 50%; 
-        width: 40px; height: 40px; border: 1px solid rgba(255, 149, 0, 0.3); 
-        border-radius: 50%; transform: translate(-50%, -50%);
-        z-index: 1999; pointer-events: none;
-      }
 
-      /* Lista de resultados Inferior */
       .results-list {
         position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
         padding-bottom: calc(15px + var(--safe-bottom));
-        display: flex; flex-direction: column; gap: 4px;
+        display: flex; flex-direction: column; gap: 5px;
       }
 
       .town-item {
         background: rgba(15, 15, 15, 0.85); backdrop-filter: blur(10px);
-        border-left: 4px solid var(--neon); margin: 0 15px; padding: 12px 20px;
+        border-left: 5px solid var(--neon); margin: 0 15px; padding: 12px 20px;
         display: flex; justify-content: space-between; align-items: center;
-        animation: fadeIn 0.4s ease-out;
+        animation: slideIn 0.3s ease-out;
       }
 
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
 
-      .town-name { font-weight: 900; font-size: 16px; color: white; text-transform: uppercase; }
-      .town-type { font-size: 10px; color: var(--neon); display: block; letter-spacing: 1px; }
-      .town-dist { font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: white; }
+      .town-name { font-weight: 900; font-size: 17px; color: white; text-transform: uppercase; }
+      .town-type { font-size: 10px; color: var(--neon); display: block; letter-spacing: 1px; font-weight: bold; }
+      .town-dist { font-family: 'Courier New', monospace; font-size: 20px; font-weight: bold; color: white; }
     </style>
   </head>
 
   <body>
     <div id="overlay">
-      <button id="start-btn">Iniciar Radar AR</button>
+      <button id="start-btn">Iniciar Radar de Barrios</button>
     </div>
 
     <div class="hud-header">
-      <div class="radar-label">Escaneando Horizonte</div>
+      <div class="radar-label">Escaneado de Proximidad</div>
       <div class="radar-line"></div>
     </div>
 
     <div class="center-dot"></div>
-    <div class="crosshair-ring"></div>
 
     <div id="results-list" class="results-list"></div>
 
-    <a-scene vr-mode-ui="enabled: false" embedded arjs="sourceType: webcam; debugUIEnabled: false; videoTexture: true;">
+    <a-scene vr-mode-ui="enabled: false" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
       <a-camera gps-camera rotation-reader></a-camera>
     </a-scene>
 
     <script>
-      let databasePueblos = [];
+      let locationsDB = [];
       let userCoords = null;
       let currentHeading = 0;
       const listContainer = document.getElementById('results-list');
 
       document.getElementById('start-btn').addEventListener('click', async () => {
-        // Solicitar permisos en iOS
         if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-          try {
-            const permission = await DeviceOrientationEvent.requestPermission();
-            if (permission !== 'granted') {
-                alert("Se requiere acceso a los sensores para el radar.");
-                return;
-            }
-          } catch (e) { console.error(e); }
+          await DeviceOrientationEvent.requestPermission();
         }
         document.getElementById('overlay').style.display = 'none';
         initApp();
       });
 
       function initApp() {
-        // Posición GPS (watchPosition para actualización constante)
         navigator.geolocation.watchPosition((pos) => {
+          const firstLoad = !userCoords;
           userCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-          // Solo llamamos a la API si la base de datos está vacía o te has movido mucho
-          if (databasePueblos.length === 0) fetchNearby(userCoords.lat, userCoords.lon);
-        }, (err) => console.warn("GPS Error:", err), { enableHighAccuracy: true });
+          if (firstLoad) fetchLocations(userCoords.lat, userCoords.lon);
+        }, null, { enableHighAccuracy: true });
 
-        // Sensor de movimiento (giroscopio)
         window.addEventListener('deviceorientation', (e) => {
           currentHeading = e.webkitCompassHeading || (360 - e.alpha);
-          updateRadar();
-        }, true);
+          updateUI();
+        });
       }
 
-      async function fetchNearby(lat, lon) {
-        // Incluye barrios (suburb), villas, pueblos y ciudades
-        const query = `[out:json];node(around:40000,${lat},${lon})["place"~"city|town|village|hamlet|suburb"];out 100;`;
+      async function fetchLocations(lat, lon) {
+        // Query extendida: suburb (barrio), quarter (distrito), neighbourhood (vecindario)
+        const query = `[out:json];node(around:20000,${lat},${lon})["place"~"city|town|village|hamlet|suburb|quarter|neighbourhood"];out 150;`;
         const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
         try {
           const res = await fetch(url);
           const data = await res.json();
-          databasePueblos = data.elements.map(el => ({
-            name: el.tags.name?.toUpperCase() || "ÁREA DESCONOCIDA",
+          locationsDB = data.elements.map(el => ({
+            name: el.tags.name?.toUpperCase() || "ZONA SIN NOMBRE",
             lat: el.lat, lon: el.lon,
-            tipo: (el.tags.place || "Lugar").toUpperCase()
+            tipo: translateType(el.tags.place)
           }));
-        } catch (e) { console.error("Error Overpass API"); }
+        } catch (e) { console.error("Error cargando barrios"); }
       }
 
-      function updateRadar() {
-        if (!userCoords || databasePueblos.length === 0) return;
+      function translateType(type) {
+        const types = {
+          'suburb': 'BARRIO',
+          'neighbourhood': 'VECINDARIO',
+          'quarter': 'DISTRITO',
+          'city': 'CIUDAD',
+          'town': 'PUEBLO',
+          'village': 'ALDEA',
+          'hamlet': 'PEDANÍA'
+        };
+        return types[type] || 'LOCALIZACIÓN';
+      }
 
-        const enfocados = databasePueblos.map(p => {
+      function updateUI() {
+        if (!userCoords || locationsDB.length === 0) return;
+
+        const filtered = locationsDB.map(p => {
           const bearing = calculateBearing(userCoords.lat, userCoords.lon, p.lat, p.lon);
-          // Diferencia entre mi brújula y la posición del lugar
           let diff = (bearing - currentHeading + 540) % 360 - 180;
           return { ...p, absDiff: Math.abs(diff), dist: calcDist(userCoords.lat, userCoords.lon, p.lat, p.lon) };
         })
-        // Filtramos solo lo que está en un rango de visión de 90° frente a la cámara
-        .filter(p => p.absDiff < 45) 
+        .filter(p => p.absDiff < 45) // FOV de 90 grados
         .sort((a, b) => a.dist - b.dist)
-        .slice(0, 5); // Máximo 5 localizaciones
+        .slice(0, 5);
 
-        renderUI(enfocados);
-      }
-
-      function renderUI(items) {
-        if (items.length === 0) {
-            listContainer.innerHTML = '';
-            return;
-        }
-
-        const newContent = items.map(p => `
+        const html = filtered.map(p => `
           <div class="town-item">
             <div>
               <span class="town-name">${p.name}</span>
-              <span class="town-type">${p.tipo} DETECTADO</span>
+              <span class="town-type">${p.tipo}</span>
             </div>
-            <div class="town-dist">${p.dist.toFixed(1)}<span style="font-size:10px; margin-left:3px">KM</span></div>
+            <div class="town-dist">${p.dist.toFixed(2)}<span style="font-size:10px; margin-left:3px">KM</span></div>
           </div>
         `).join('');
-        
-        // Evitar parpadeos: solo actualizar si el contenido cambia
-        if (listContainer.innerHTML !== newContent) {
-            listContainer.innerHTML = newContent;
+
+        if (listContainer.innerHTML !== html) {
+          listContainer.innerHTML = html;
         }
       }
 
-      // Matemáticas de Navegación
+      // Utilidades matemáticas
       function toRad(d) { return d * Math.PI / 180; }
-      
       function calculateBearing(lat1, lon1, lat2, lon2) {
         const dLon = toRad(lon2 - lon1);
         const y = Math.sin(dLon) * Math.cos(toRad(lat2));
@@ -191,9 +172,8 @@
                   Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
         return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
       }
-
       function calcDist(l1, n1, l2, n2) {
-        const R = 6371; // Radio de la Tierra en KM
+        const R = 6371;
         const dL = toRad(l2-l1); const dN = toRad(n2-n1);
         const a = Math.sin(dL/2)**2 + Math.cos(toRad(l1))*Math.cos(toRad(l2))*Math.sin(dN/2)**2;
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
